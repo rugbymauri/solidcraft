@@ -1,0 +1,18 @@
+User:
+Please reply with the clipboard test answer.
+It should have several blocks.
+
+Assistant:
+Clipboard test heading
+
+FIRST PARAGRAPH ALPHA. This text belongs to the assistant, not the CAD model.
+
+SECOND PARAGRAPH BETA. Selecting all should make a whole message recoverable.
+
+• List item one
+• List item two
+
+CODE BLOCK GAMMA
+second code line
+
+FINAL PARAGRAPH OMEGA. End of the deterministic answer.
