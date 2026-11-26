@@ -6192,49 +6192,80 @@ impl Document {
     /// text's height, place, angle and spacing that were typed as expressions, and its words built from
     /// text parameters. A text's outlines are rebuilt from them when the sketch's links are
     /// refreshed, so this comes before that. What was typed as such is left as it is.
+    ///
+    /// Every value of every text is worked out and checked before the first one is written: on an
+    /// error the sketch is left exactly as it was.
     pub fn apply_text_values(&self, vals: &std::collections::BTreeMap<String, expr::Value>, sk: &mut Sketch) -> Result<()> {
         use crate::eval::val;
-        for link in &mut sk.links {
-            let solidcraft_sketch::LinkSource::Text { text, at, height, angle, style, exprs, .. } = &mut link.source else { continue };
+        /// What one text's expressions come to; `None` keeps the stored value.
+        struct TextValues {
+            x: Option<f64>,
+            y: Option<f64>,
+            height: Option<f64>,
+            angle: Option<f64>,
+            letter_spacing: Option<f64>,
+            line_spacing: Option<f64>,
+            text: Option<String>,
+        }
+        let mut found = Vec::new();
+        for (i, link) in sk.links.iter().enumerate() {
+            let solidcraft_sketch::LinkSource::Text { exprs, .. } = &link.source else { continue };
             let number = |e: &Option<String>, kind: Kind, what: &str| -> Result<Option<f64>> {
                 match e {
                     None => Ok(None),
                     Some(e) => val(vals, e, kind).map(Some).map_err(|error| DocError::Expr(format!("{what}: {error}"))),
                 }
             };
-            if let Some(v) = number(&exprs.x, Kind::Length, "text X")? {
-                at.x = v;
-            }
-            if let Some(v) = number(&exprs.y, Kind::Length, "text Y")? {
-                at.y = v;
-            }
-            if let Some(v) = number(&exprs.height, Kind::Length, "text height")? {
-                *height = v;
-            }
-            if let Some(v) = number(&exprs.angle, Kind::Angle, "text angle")? {
-                *angle = v;
-            }
-            if exprs.height.is_some() && !(*height > 1e-6 && *height < 1e5) {
+            let x = number(&exprs.x, Kind::Length, "text X")?;
+            let y = number(&exprs.y, Kind::Length, "text Y")?;
+            let height = number(&exprs.height, Kind::Length, "text height")?;
+            let angle = number(&exprs.angle, Kind::Angle, "text angle")?;
+            if height.is_some_and(|h| !(h > 1e-6 && h < 1e5)) {
                 return Err(DocError::Invalid("a text's height must be positive".into()));
             }
-            if let Some(v) = number(&exprs.letter_spacing, Kind::Length, "text letter spacing")? {
-                style.letter_spacing = v;
-            }
-            if let Some(v) = number(&exprs.line_spacing, Kind::Unitless, "text line spacing")? {
-                style.line_spacing = v;
-            }
-            if exprs.letter_spacing.is_some() && !style.letter_spacing.is_finite() {
+            let letter_spacing = number(&exprs.letter_spacing, Kind::Length, "text letter spacing")?;
+            let line_spacing = number(&exprs.line_spacing, Kind::Unitless, "text line spacing")?;
+            if letter_spacing.is_some_and(|v| !v.is_finite()) {
                 return Err(DocError::Invalid("a text's letter spacing must be a finite length".into()));
             }
-            if exprs.line_spacing.is_some() && !(style.line_spacing.is_finite() && style.line_spacing > 0.0) {
+            if line_spacing.is_some_and(|v| !(v.is_finite() && v > 0.0)) {
                 return Err(DocError::Invalid("a text's line spacing must be a positive factor".into()));
             }
-            if let Some(e) = &exprs.text {
-                let words = self.eval_words(e, vals).map_err(|error| DocError::Expr(format!("text: {error}")))?;
-                if words.trim().is_empty() || words.chars().count() > solidcraft_sketch::MAX_TEXT_CHARS {
-                    return Err(DocError::Invalid(format!("text: `{e}` gives no words, or too many")));
+            let text = match &exprs.text {
+                None => None,
+                Some(e) => {
+                    let words = self.eval_words(e, vals).map_err(|error| DocError::Expr(format!("text: {error}")))?;
+                    if words.trim().is_empty() || words.chars().count() > solidcraft_sketch::MAX_TEXT_CHARS {
+                        return Err(DocError::Invalid(format!("text: `{e}` gives no words, or too many")));
+                    }
+                    Some(words)
                 }
-                *text = words;
+            };
+            found.push((i, TextValues { x, y, height, angle, letter_spacing, line_spacing, text }));
+        }
+        for (i, v) in found {
+            let Some(link) = sk.links.get_mut(i) else { continue };
+            let solidcraft_sketch::LinkSource::Text { text, at, height, angle, style, .. } = &mut link.source else { continue };
+            if let Some(x) = v.x {
+                at.x = x;
+            }
+            if let Some(y) = v.y {
+                at.y = y;
+            }
+            if let Some(h) = v.height {
+                *height = h;
+            }
+            if let Some(a) = v.angle {
+                *angle = a;
+            }
+            if let Some(s) = v.letter_spacing {
+                style.letter_spacing = s;
+            }
+            if let Some(s) = v.line_spacing {
+                style.line_spacing = s;
+            }
+            if let Some(t) = v.text {
+                *text = t;
             }
         }
         Ok(())

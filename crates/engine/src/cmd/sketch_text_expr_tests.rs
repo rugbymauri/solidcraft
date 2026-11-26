@@ -195,6 +195,36 @@ fn a_texts_letter_and_line_spacing_can_be_expressions_too() {
 }
 
 #[test]
+fn a_text_value_that_cannot_be_used_leaves_the_whole_sketch_as_it_was() {
+    use solidcraft_doc::expr::Value as V;
+    let mut s = Session::default();
+    run(&mut s, "parameters.add", json!({"name": "tall", "expression": "12 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "gap", "expression": "1 mm"}));
+    run(&mut s, "parameters.add", json!({"name": "lines", "expression": "1.5", "unit": ""}));
+    run(&mut s, "sketch.create", json!({"plane": "XY", "name": "S"}));
+    let r = run(&mut s, "sketch.text", json!({"text": "II\nII", "at": [0, 0], "height": "tall", "letter_spacing": "gap", "line_spacing": "lines"}));
+    let link = r["link"].as_str().unwrap().to_string();
+    run(&mut s, "sketch.finish", json!({}));
+    let id = s.doc.find_feature("S").unwrap().id;
+    let mut sk = s.doc.sketch(id).unwrap().clone();
+    let before = format!("{:?}", sk.link(&link).unwrap().source);
+    // The height and the letter spacing come out fine and differ from what is stored; the line
+    // spacing comes out as 0, which no text can have. Nothing of the text may change.
+    let (mut vals, _) = s.doc.param_values();
+    vals.insert("tall".into(), V::length(20.0));
+    vals.insert("gap".into(), V::length(3.0));
+    vals.insert("lines".into(), V::num(0.0));
+    let e = s.doc.apply_text_values(&vals, &mut sk).unwrap_err().to_string();
+    assert!(e.contains("line spacing"), "{e}");
+    assert_eq!(format!("{:?}", sk.link(&link).unwrap().source), before);
+    // With a usable line spacing, all three are taken.
+    vals.insert("lines".into(), V::num(2.0));
+    s.doc.apply_text_values(&vals, &mut sk).unwrap();
+    let LinkSource::Text { height, style, .. } = &sk.link(&link).unwrap().source else { panic!("not a text") };
+    assert_eq!((*height, style.letter_spacing, style.line_spacing), (20.0, 3.0, 2.0));
+}
+
+#[test]
 fn the_parameters_a_text_uses_are_listed_renamed_and_kept() {
     let mut s = Session::default();
     run(&mut s, "parameters.add", json!({"name": "tall", "expression": "12 mm"}));
